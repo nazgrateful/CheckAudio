@@ -140,6 +140,7 @@ a.btn { text-decoration: none; display: inline-block; }
 .metric.status-bad { border-left: 4px solid var(--critical); }
 .metric.status-warn { border-left: 4px solid var(--warning); }
 .metric.status-good { border-left: 4px solid var(--good); }
+.readout { margin: 0 0 6px; min-height: 1.3em; font-variant-numeric: tabular-nums; }
 .chart-note { margin: 10px 0 0; font-size: 0.85rem; color: var(--text-2); }
 .chart-note.lead { margin: 0 0 12px; }
 .band-note { grid-column: 1 / -1; margin: -2px 0 8px; font-size: 0.8rem; color: var(--text-2); }

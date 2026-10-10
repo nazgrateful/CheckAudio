@@ -611,7 +611,15 @@
     $('layer-legend').replaceChildren(...state.layers.map((l) => el('span', { style: `--c: var(${LAYER_COLOR[l.id]})` }, l.name)));
     const canvas = $('layer-spectrum');
     drawSpectra(canvas, series);
-    hoverable(canvas, $('layer-readout'), (x) => drawSpectra(canvas, series, x));
+    // Hover readout is opt-in for this chart (busy with five lines); the choice is remembered.
+    const on = $('layer-hover').checked;
+    $('layer-readout').hidden = !on;
+    if (on) {
+      hoverable(canvas, $('layer-readout'), (x) => drawSpectra(canvas, series, x));
+      $('layer-readout').textContent = 'Hover over the chart to read each layer\'s level';
+    } else {
+      canvas.onpointermove = canvas.onpointerleave = null;
+    }
 
     $('layer-cards').replaceChildren(...state.layers.map((l) => {
       const top = [...l.bands].sort((a, b) => b.percent - a.percent).slice(0, 2).filter((b) => b.percent >= 5);
@@ -832,6 +840,11 @@
     if (link) { $('link').value = link; loadFromDrive((p) => GD.fromLink(link, p)); }
   });
   $('sec-copy').addEventListener('click', () => navigator.clipboard.writeText(state.scan.sha256));
+  try { $('layer-hover').checked = localStorage.getItem('checkaudio.layerHover') === '1'; } catch (e) { /* storage blocked */ }
+  $('layer-hover').addEventListener('change', (e) => {
+    try { localStorage.setItem('checkaudio.layerHover', e.target.checked ? '1' : '0'); } catch (err) { /* storage blocked */ }
+    if (state.layers) renderLayers();
+  });
   $('history-toggle').addEventListener('change', (e) => { HI.setEnabled(e.target.checked); renderHistory(); });
   $('history-clear').addEventListener('click', async () => {
     if (!confirm('Remove all saved results from this browser?')) return;
