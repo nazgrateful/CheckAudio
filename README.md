@@ -15,7 +15,7 @@ Opening `index.html` directly also works. Drop in a WAV, FLAC, MP3, OGG/Opus or 
 ## What it does
 
 ### Security scan
-Runs first on every file. Audio data can't run on its own, so malware that travels as "audio" depends on tricks. The scan looks for each of them:
+Runs first on every file. A banner above the tabs shows the result straight away: green **Safe: no threats found**, amber **Suspicious** or red **Dangerous**. Click it to open the Security page, which lists each check with a ✓ or ✗. Audio data can't run on its own, so malware that travels as "audio" depends on tricks. The scan looks for each of them:
 
 | Check | What it finds |
 |---|---|
@@ -68,6 +68,15 @@ Speech-to-text with OpenAI's Whisper model, run in the browser through [transfor
 
 The model downloads from the internet the first time (about 40 to 250 MB), and the browser caches it after that.
 
+### Explanations
+Every measurement card shows the value, **what it means for this file** (with a Good / Check / Problem / Info label), and what the measurement is. The other results are explained the same way:
+- each frequency band gets a note, plus a summary of the overall balance
+- each layer and each detected steady tone is described, including likely sources (hum also hints at the region it was recorded in)
+- every chart has a "how to read this" caption
+
+### History
+Every file you check is saved in this browser (IndexedDB) and listed under **Previously checked files**, with its date, health score and security verdict. Layer results and transcripts are added as you run them. Click an entry to reopen the full results, charts included, without the file. Only results are stored, never the audio, so playback and new layer or transcript runs need the file again. You can turn saving off, remove entries one by one, or clear all.
+
 ### Export
 **Export report** saves everything (security scan, findings, measurements, layers, tones, transcript) as JSON.
 
@@ -96,6 +105,8 @@ Without this setup, you can still use files synced by **Google Drive for desktop
 |---|---|
 | `scan.js` | Security scan: real-type detection, embedded payloads, malformed headers, SHA-256 |
 | `gdrive.js`, `config.js` | Google Drive import (Picker, sign-in, link download) and its settings |
+| `explain.js` | Plain-language explanations for every measurement, band, layer, tone and chart |
+| `history.js` | Saved results in IndexedDB |
 | `analysis.js` | Health-check engine: FFT, loudness, clipping, hum, tones, bandwidth, format sniffing. Pure functions, works in Node and the browser |
 | `layers.js` | Layer separation (HPSS, mid/side) and per-layer frequency profiles |
 | `transcribe.js` | Whisper transcription in a Web Worker |

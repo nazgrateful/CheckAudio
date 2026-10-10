@@ -106,3 +106,13 @@ test('Drive link parsing', () => {
   ]) assert.equal(GDrive.extractId(link), id, link);
   assert.equal(GDrive.extractId('https://example.com/song.mp3'), null);
 });
+
+test('clean audio passes every check; a disguised program fails the right ones', async () => {
+  const clean = await AS.scan(ab(wav()), 'take1.wav');
+  assert.deepEqual(clean.checks.map((c) => c.status), Array(7).fill('pass'));
+  const bad = await AS.scan(ab(exe()), 'song.mp3');
+  const st = Object.fromEntries(bad.checks.map((c) => [c.id, c.status]));
+  assert.equal(st.type, 'fail');
+  assert.equal(st.name, 'fail');
+  assert.equal(st.headers, 'skip');
+});

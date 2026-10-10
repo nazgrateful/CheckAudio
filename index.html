@@ -36,6 +36,17 @@
       </form>
     </div>
 
+    <section id="history" class="history">
+      <div class="history-head">
+        <h3>Previously checked files</h3>
+        <div class="player">
+          <label class="toggle"><input type="checkbox" id="history-toggle" checked> Save results in this browser</label>
+          <button id="history-clear" class="btn ghost small" type="button" hidden>Clear all</button>
+        </div>
+      </div>
+      <ul id="history-list" class="history-list"></ul>
+    </section>
+
     <div id="status" class="status" role="status" hidden>
       <div class="spinner" aria-hidden="true"></div>
       <span id="status-text">Working…</span>
@@ -55,6 +66,13 @@
         </div>
       </div>
 
+      <p id="saved-banner" class="saved-banner" hidden></p>
+      <button id="safety" class="safety" type="button" hidden>
+        <span class="safety-icon" id="safety-icon" aria-hidden="true"></span>
+        <span><b id="safety-title"></b><span id="safety-text"></span></span>
+        <span class="safety-link">Security details →</span>
+      </button>
+
       <nav class="tabs" role="tablist">
         <button role="tab" aria-selected="false" data-tab="security">Security <span id="sec-badge" class="badge"></span></button>
         <button role="tab" aria-selected="true" data-tab="health">Health</button>
@@ -71,6 +89,8 @@
             <p class="muted" id="sec-sub"></p>
           </div>
         </div>
+        <h3>What was checked</h3>
+        <ul id="sec-checks" class="checks"></ul>
         <h3>Findings</h3>
         <ul id="sec-findings" class="issues"></ul>
         <h3>File fingerprint</h3>
@@ -105,23 +125,28 @@
         <h3>Findings</h3>
         <ul id="issues" class="issues"></ul>
 
-        <h3>Measurements</h3>
+        <h3>Measurements explained</h3>
+        <p class="muted small">Each card shows the value, what it means for this file, and what the measurement is.</p>
         <div id="metrics" class="metrics"></div>
 
         <div class="chart-card">
           <div class="chart-head"><h3>Waveform</h3><span class="muted small">Red marks = clipping</span></div>
           <canvas id="wave" height="140"></canvas>
+          <p class="chart-note" id="wave-note"></p>
         </div>
         <div class="chart-card">
           <div class="chart-head"><h3>Frequency spectrum</h3><span class="muted small" id="spec-readout">Hover for values</span></div>
           <canvas id="spectrum" height="220"></canvas>
+          <p class="chart-note" id="spectrum-note"></p>
         </div>
         <div class="chart-card">
           <div class="chart-head"><h3>Spectrogram</h3><span class="muted small">Time → · frequency ↑ (log) · brighter = louder</span></div>
           <canvas id="spectrogram" height="220"></canvas>
+          <p class="chart-note" id="spectrogram-note"></p>
         </div>
         <div class="chart-card">
           <div class="chart-head"><h3>Energy by frequency band</h3></div>
+          <p class="chart-note lead" id="bands-note"></p>
           <div id="bands" class="bands"></div>
         </div>
       </div>
@@ -139,6 +164,7 @@
             <div class="chart-head"><h3>Layer spectra</h3><span class="muted small" id="layer-readout">Hover for values</span></div>
             <div id="layer-legend" class="legend"></div>
             <canvas id="layer-spectrum" height="240"></canvas>
+            <p class="chart-note">Each line is one layer's frequency content: low pitches on the left, high on the right, and higher lines mean more energy. Where a line rises above the others, that layer dominates those pitches. For example, percussive peaks in the lows are drums, and a tonal line rising in the mids is melody or voice.</p>
           </div>
           <h3>Layers</h3>
           <div id="layer-cards" class="layer-cards"></div>
@@ -196,6 +222,8 @@
 
   <script src="config.js"></script>
   <script src="scan.js"></script>
+  <script src="explain.js"></script>
+  <script src="history.js"></script>
   <script src="gdrive.js"></script>
   <script src="analysis.js"></script>
   <script src="layers.js"></script>

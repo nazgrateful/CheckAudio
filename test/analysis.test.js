@@ -127,3 +127,11 @@ test('dissect returns five layers for stereo input', async () => {
   const res = await AL.dissect([x, x.map((v) => v * 0.5)], SR);
   assert.deepEqual(res.layers.map((l) => l.id), ['harmonic', 'percussive', 'residual', 'mid', 'side']);
 });
+
+test('effective bit depth handles Chrome-style mixed 32767/32768 scaling', () => {
+  const x = Float32Array.from({ length: 4800 }, (_, i) => {
+    const k = Math.round(Math.sin(i / 5) * 20000);
+    return k >= 0 ? k / 32767 : k / 32768;
+  });
+  assert.equal(AH.effectiveBitDepth([x]), 16);
+});
