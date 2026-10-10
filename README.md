@@ -59,7 +59,7 @@ Splits the audio into layers you can **play on their own and download as WAV**:
 - **Noise / residual**: hiss, breath, room tone, reverb tails
 - **Centre** and **Sides** (stereo files): vocals usually sit in the centre, wide instruments and reverb in the sides
 
-For each layer it reports the share of total energy, level, the main frequency range, the strongest frequency, the brightness centre, and which bands it mostly occupies. It also overlays all the layer spectra on one chart, and lists the **steady tones** that look added to the recording.
+For each layer it reports the share of total energy, level, the main frequency range, the strongest frequency, the brightness centre, and which bands it mostly occupies. It also overlays all the layer spectra on one chart (tick **Show values on hover** to read exact levels; off by default and remembered), and lists the **steady tones** that look added to the recording.
 
 The separation uses signal processing (median-filter harmonic/percussive separation and mid/side decoding), not AI. The tonal, percussive and noise layers always add back up exactly to the original, but the split is rough. For true vocal, drum and bass stems you need an AI separator such as [Demucs](https://github.com/adefossez/demucs).
 
