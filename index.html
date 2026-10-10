@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>CheckAudio</title>
-  <meta name="description" content="Check the health of an audio file, dissect its layers and frequencies, and transcribe the speech, all in your browser.">
+  <meta name="description" content="Scan an audio file for threats, check its health, dissect its layers and frequencies, and transcribe the speech, all in your browser.">
   <link rel="icon" href="data:,">
   <link rel="stylesheet" href="style.css">
 </head>
@@ -15,7 +15,7 @@
         <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M3 12h2l2-6 3 12 3-9 2 5 2-2h4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
         <span>CheckAudio</span>
       </div>
-      <p class="tagline">Health check · Layers · Transcript. Your file never leaves your computer.</p>
+      <p class="tagline">Security scan · Health check · Layers · Transcript. Your file never leaves your computer.</p>
     </div>
   </header>
 
@@ -23,8 +23,18 @@
     <label id="drop" class="drop" tabindex="0">
       <input id="file" type="file" accept="audio/*,.wav,.flac,.mp3,.ogg,.opus,.m4a,.aac,.aif,.aiff,.webm" hidden>
       <strong>Drop an audio file here</strong>
-      <span>or click to choose · WAV, FLAC, MP3, OGG, Opus, M4A</span>
+      <span>or click to choose · WAV, FLAC, MP3, OGG, Opus, M4A · Drive links work too</span>
     </label>
+    <div class="sources">
+      <button id="gdrive" class="btn ghost" type="button">
+        <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M8 3h8l6 10-4 7H6l-4-7z M8 3l6 10h8 M2 13h12l-4 7" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
+        Google Drive
+      </button>
+      <form id="link-form" class="link-form">
+        <input id="link" type="url" inputmode="url" placeholder="…or paste a Google Drive link" aria-label="Google Drive link">
+        <button class="btn ghost" type="submit">Open</button>
+      </form>
+    </div>
 
     <div id="status" class="status" role="status" hidden>
       <div class="spinner" aria-hidden="true"></div>
@@ -46,10 +56,38 @@
       </div>
 
       <nav class="tabs" role="tablist">
+        <button role="tab" aria-selected="false" data-tab="security">Security <span id="sec-badge" class="badge"></span></button>
         <button role="tab" aria-selected="true" data-tab="health">Health</button>
         <button role="tab" aria-selected="false" data-tab="layers">Layers &amp; frequencies</button>
         <button role="tab" aria-selected="false" data-tab="transcript">Transcript</button>
       </nav>
+
+      <!-- Security -->
+      <div class="panel" data-panel="security" hidden>
+        <div class="summary">
+          <div class="shield" id="sec-shield" aria-hidden="true"></div>
+          <div>
+            <h2 id="sec-verdict"></h2>
+            <p class="muted" id="sec-sub"></p>
+          </div>
+        </div>
+        <h3>Findings</h3>
+        <ul id="sec-findings" class="issues"></ul>
+        <h3>File fingerprint</h3>
+        <div class="intro">
+          <dl class="facts">
+            <dt>Real file type</dt><dd id="sec-type"></dd>
+            <dt>Size</dt><dd id="sec-size"></dd>
+            <dt>SHA-256</dt><dd><code id="sec-hash"></code></dd>
+          </dl>
+          <div class="player">
+            <a id="sec-vt" class="btn" target="_blank" rel="noopener noreferrer">Check on VirusTotal ↗</a>
+            <button id="sec-copy" class="btn ghost" type="button">Copy SHA-256</button>
+          </div>
+          <p class="muted small">VirusTotal checks this fingerprint against 70+ antivirus engines. Only the fingerprint is sent, not your file. If VirusTotal has never seen the file, it will offer to upload it. That step is up to you.</p>
+        </div>
+        <p class="muted small">This scan looks for the ways malware hides in audio files: disguised programs, hidden payloads, malformed headers and script text. It does not replace a full antivirus program.</p>
+      </div>
 
       <!-- Health -->
       <div class="panel" data-panel="health">
@@ -156,6 +194,9 @@
     </section>
   </main>
 
+  <script src="config.js"></script>
+  <script src="scan.js"></script>
+  <script src="gdrive.js"></script>
   <script src="analysis.js"></script>
   <script src="layers.js"></script>
   <script src="transcribe.js"></script>
