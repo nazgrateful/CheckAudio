@@ -140,11 +140,11 @@
       if (extra < 16) return;
       const tail = identify(u8.subarray(end));
       if (tail.kind === 'executable' || tail.kind === 'script' || tail.kind === 'archive') {
-        out.push({ severity: 'critical', title: `Hidden ${tail.name} after the end of the ${what} (${kb(extra)})`, detail: 'Something was attached after the audio, where players never look. Hiding a payload there is a known way to smuggle malware.', offset: end });
+        out.push({ check: 'appended', severity: 'critical', title: `Hidden ${tail.name} after the end of the ${what} (${kb(extra)})`, detail: 'Something was attached after the audio, where players never look. Hiding a payload there is a known way to smuggle malware.', offset: end });
       } else if (ascii(u8, end, 3) === 'ID3' || ascii(u8, end, 3) === 'TAG') {
-        out.push({ severity: 'info', title: `Tag data after the end of the ${what}`, detail: 'Some tagging tools append MP3-style tags to other formats. This is harmless.' });
+        out.push({ check: 'appended', severity: 'info', title: `Tag data after the end of the ${what}`, detail: 'Some tagging tools append MP3-style tags to other formats. This is harmless.' });
       } else if (extra > 1024) {
-        out.push({ severity: 'warning', title: `Hidden data after the end of the ${what} (${kb(extra)})`, detail: 'Players ignore these bytes, so they could hold anything. It is sometimes harmless (badly written editors), but it is also how payloads are hidden.', offset: end });
+        out.push({ check: 'appended', severity: 'warning', title: `Hidden data after the end of the ${what} (${kb(extra)})`, detail: 'Players ignore these bytes, so they could hold anything. It is sometimes harmless (badly written editors), but it is also how payloads are hidden.', offset: end });
       }
     };
 
@@ -152,18 +152,18 @@
       const le = s4 === 'RIFF';
       const declared = (le ? u32le(u8, 4) : u32be(u8, 4)) + 8;
       if (declared > n + 1) {
-        out.push({ severity: 'info', title: 'File is shorter than its header says', detail: `The header promises ${kb(declared)} but the file is ${kb(n)}. It is probably truncated (an interrupted download or copy).` });
+        out.push({ check: 'headers', severity: 'info', title: 'File is shorter than its header says', detail: `The header promises ${kb(declared)} but the file is ${kb(n)}. It is probably truncated (an interrupted download or copy).` });
       } else {
         trailing(declared + (declared & 1), le ? 'WAV data' : 'AIFF data');
       }
       for (let o = 12, guard = 0; o + 8 <= Math.min(n, declared) && guard < 10000; guard++) {
         const id = ascii(u8, o, 4), size = le ? u32le(u8, o + 4) : u32be(u8, o + 4);
         if (!/^[\x20-\x7e]{4}$/.test(id)) {
-          out.push({ severity: 'warning', title: 'Malformed chunk structure', detail: `Unreadable chunk ID at byte ${o}. Damaged or deliberately malformed headers can crash or exploit media players.`, offset: o });
+          out.push({ check: 'headers', severity: 'warning', title: 'Malformed chunk structure', detail: `Unreadable chunk ID at byte ${o}. Damaged or deliberately malformed headers can crash or exploit media players.`, offset: o });
           break;
         }
         if (o + 8 + size > n && !(id === 'data' || id === 'SSND')) {
-          out.push({ severity: 'warning', title: `Chunk "${id.trim()}" claims more data than the file has`, detail: `It says ${kb(size)} but only ${kb(n - o - 8)} remain. Oversized length fields are a classic way of attacking media players.`, offset: o });
+          out.push({ check: 'headers', severity: 'warning', title: `Chunk "${id.trim()}" claims more data than the file has`, detail: `It says ${kb(size)} but only ${kb(n - o - 8)} remain. Oversized length fields are a classic way of attacking media players.`, offset: o });
           break;
         }
         o += 8 + size + (size & 1);
@@ -174,10 +174,10 @@
         last = (u8[o] & 0x80) !== 0;
         const type = u8[o] & 0x7f, len = (u8[o + 1] << 16) | (u8[o + 2] << 8) | u8[o + 3];
         if (type === 127 || o + 4 + len > n) {
-          out.push({ severity: 'warning', title: 'Malformed FLAC metadata', detail: `Metadata block at byte ${o} is invalid or runs past the end of the file. Damaged or deliberately malformed headers can crash or exploit media players.`, offset: o });
+          out.push({ check: 'headers', severity: 'warning', title: 'Malformed FLAC metadata', detail: `Metadata block at byte ${o} is invalid or runs past the end of the file. Damaged or deliberately malformed headers can crash or exploit media players.`, offset: o });
           break;
         }
-        if (type === 6 && len > 20 * 1048576) out.push({ severity: 'info', title: 'Very large embedded picture', detail: `The cover art block is ${kb(len)}.` });
+        if (type === 6 && len > 20 * 1048576) out.push({ check: 'headers', severity: 'info', title: 'Very large embedded picture', detail: `The cover art block is ${kb(len)}.` });
         o += 4 + len;
       }
     }
@@ -186,9 +186,9 @@
       const ver = u8[3];
       const size = ((u8[6] & 0x7f) << 21) | ((u8[7] & 0x7f) << 14) | ((u8[8] & 0x7f) << 7) | (u8[9] & 0x7f);
       if (ver < 2 || ver > 4 || [6, 7, 8, 9].some((i) => u8[i] & 0x80)) {
-        out.push({ severity: 'warning', title: 'Malformed ID3 tag header', detail: 'The MP3 tag header has invalid values. Damaged or deliberately malformed tags can crash or exploit media players.' });
+        out.push({ check: 'headers', severity: 'warning', title: 'Malformed ID3 tag header', detail: 'The MP3 tag header has invalid values. Damaged or deliberately malformed tags can crash or exploit media players.' });
       } else if (10 + size > n) {
-        out.push({ severity: 'warning', title: 'ID3 tag claims more data than the file has', detail: `The tag says ${kb(size)} but the file is ${kb(n)}. Oversized length fields are a classic way of attacking media players.` });
+        out.push({ check: 'headers', severity: 'warning', title: 'ID3 tag claims more data than the file has', detail: `The tag says ${kb(size)} but the file is ${kb(n)}. Oversized length fields are a classic way of attacking media players.` });
       }
     }
     return out;
@@ -198,22 +198,45 @@
   function checkName(name, real) {
     const out = [];
     if (/[‪-‮⁦-⁩]/.test(name)) {
-      out.push({ severity: 'critical', title: 'Hidden text-direction characters in the name', detail: 'The name contains invisible right-to-left characters, a trick used to make "song3pm.exe" display as "songexe.mp3". The real extension is not what you see.' });
+      out.push({ check: 'name', severity: 'critical', title: 'Hidden text-direction characters in the name', detail: 'The name contains invisible right-to-left characters, a trick used to make "song3pm.exe" display as "songexe.mp3". The real extension is not what you see.' });
     }
     const parts = name.trim().toLowerCase().split('.');
     const ext = parts.length > 1 ? parts[parts.length - 1].trim() : '';
     const prev = parts.length > 2 ? parts[parts.length - 2].trim() : '';
     if (DANGEROUS_EXT[ext]) {
       out.push({
+        check: 'name',
         severity: 'critical',
         title: AUDIO_EXT.includes(prev) ? `Disguised ${DANGEROUS_EXT[ext]} (.${prev}.${ext})` : `This is a ${DANGEROUS_EXT[ext]} (.${ext}), not audio`,
         detail: 'Opening this file runs code on your computer. A double extension like ".mp3.exe" is a common way of passing a program off as a song.',
       });
     }
     if (real.kind === 'audio' && ext && AUDIO_EXT.includes(ext) && real.ext && !real.ext.includes(ext)) {
-      out.push({ severity: 'info', title: `Extension says .${ext} but the file is ${real.name}`, detail: 'This is harmless: most players open it either way. It just means the file was renamed or mislabelled.' });
+      out.push({ check: 'name', severity: 'info', title: `Extension says .${ext} but the file is ${real.name}`, detail: 'This is harmless: most players open it either way. It just means the file was renamed or mislabelled.' });
     }
     return { findings: out, ext };
+  }
+
+  const CHECKS = [
+    ['type', 'Contents are really audio', (real) => `Detected: ${real.name}`],
+    ['name', 'File name is honest', () => 'No fake, double or hidden extension'],
+    ['programs', 'No hidden programs', () => 'No Windows or Linux executables inside'],
+    ['archives', 'No hidden archives', () => 'No ZIP or RAR files tucked inside'],
+    ['appended', 'Nothing attached after the audio', () => 'The file ends where the audio ends'],
+    ['headers', 'Headers are well-formed', () => 'Size fields match the file, nothing built to crash a player'],
+    ['scripts', 'No script or command text', () => 'No PowerShell, JavaScript, cmd or similar'],
+  ];
+
+  /** One pass/fail line per check, so a clean result shows what was verified. */
+  function summarizeChecks(findings, real, ext) {
+    const notAudio = real.kind !== 'audio';
+    return CHECKS.map(([id, label, passDetail]) => {
+      if (notAudio && (id === 'appended' || id === 'headers')) return { id, label, status: 'skip', detail: 'Not applicable: the file is not audio' };
+      if (notAudio && id === 'name' && AUDIO_EXT.includes(ext)) return { id, label, status: 'fail', detail: `Named .${ext} but it is a ${real.name}` };
+      const hits = findings.filter((f) => f.check === id && f.severity !== 'info');
+      const worst = hits.some((f) => f.severity === 'critical') ? 'fail' : hits.length ? 'warn' : 'pass';
+      return { id, label, status: worst, detail: worst === 'pass' ? passDetail(real) : hits.map((f) => f.title).join('; ') };
+    });
   }
 
   async function sha256(buffer) {
@@ -236,11 +259,11 @@
     findings.push(...nameCheck.findings);
 
     if (real.kind === 'executable' || real.kind === 'script') {
-      findings.push({ severity: 'critical', title: `This file is a ${real.name}`, detail: `The content is not audio${nameCheck.ext ? `, despite the .${nameCheck.ext} name` : ''}. Opening it could run code on your computer. Delete it unless you know exactly where it came from.` });
+      findings.push({ check: 'type', severity: 'critical', title: `This file is a ${real.name}`, detail: `The content is not audio${nameCheck.ext ? `, despite the .${nameCheck.ext} name` : ''}. Opening it could run code on your computer. Delete it unless you know exactly where it came from.` });
     } else if (real.kind === 'archive' || real.kind === 'document') {
-      findings.push({ severity: 'warning', title: `This file is a ${real.name}, not audio`, detail: 'It may contain other files, including programs. Don\'t open it unless you trust the source.' });
+      findings.push({ check: 'type', severity: 'warning', title: `This file is a ${real.name}, not audio`, detail: 'It may contain other files, including programs. Don\'t open it unless you trust the source.' });
     } else if (real.kind === 'unknown') {
-      findings.push({ severity: 'warning', title: 'Unrecognised file format', detail: 'The content does not match any known audio format. It could be damaged, or something else with an audio name.' });
+      findings.push({ check: 'type', severity: 'warning', title: 'Unrecognised file format', detail: 'The content does not match any known audio format. It could be damaged, or something else with an audio name.' });
     }
 
     if (real.kind === 'audio') findings.push(...checkStructure(u8, real.kind));
@@ -248,6 +271,7 @@
     for (const h of findEmbedded(u8, real.kind === 'executable' ? 2 : 1)) {
       const sev = h.type === 'zip' || h.type === 'rar' ? 'warning' : 'critical';
       findings.push({
+        check: sev === 'critical' ? 'programs' : 'archives',
         severity: sev,
         title: `Embedded ${h.detail} at byte ${h.offset.toLocaleString('en-US')}`,
         detail: sev === 'critical'
@@ -259,10 +283,10 @@
 
     const text = findText(u8);
     for (const k of text.keywords) {
-      findings.push({ severity: 'warning', title: `Script text found: "${k.keyword}"`, detail: `Text typical of a ${k.label} appears at byte ${k.offset.toLocaleString('en-US')}. Audio has no use for it, so it may be part of a payload or an attempt to attack a player.`, offset: k.offset });
+      findings.push({ check: 'scripts', severity: 'warning', title: `Script text found: "${k.keyword}"`, detail: `Text typical of a ${k.label} appears at byte ${k.offset.toLocaleString('en-US')}. Audio has no use for it, so it may be part of a payload or an attempt to attack a player.`, offset: k.offset });
     }
     if (text.urls.length) {
-      findings.push({ severity: 'info', title: `Links in the file (${text.urls.length})`, detail: `Usually artist or label websites in the tags. Don't open links you don't recognise: ${text.urls.join(', ')}`, urls: text.urls });
+      findings.push({ check: 'links', severity: 'info', title: `Links in the file (${text.urls.length})`, detail: `Usually artist or label websites in the tags. Don't open links you don't recognise: ${text.urls.join(', ')}`, urls: text.urls });
     }
 
     const order = { critical: 0, warning: 1, info: 2 };
@@ -272,6 +296,7 @@
     return {
       verdict,
       findings,
+      checks: summarizeChecks(findings, real, nameCheck.ext),
       detected: real,
       size: u8.length,
       sha256: hash,

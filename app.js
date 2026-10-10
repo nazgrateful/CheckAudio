@@ -7,12 +7,15 @@
   const AT = window.AudioTranscribe;
   const AS = window.AudioScan;
   const GD = window.GDrive;
+  const AE = window.AudioExplain;
+  const HI = window.AudioHistory;
   const $ = (id) => document.getElementById(id);
 
   const state = {
     file: null, scan: null, channels: null, sampleRate: 0, format: null, resampled: false,
     report: null, envelope: null, sgram: null,
     layers: null, tones: null, transcript: null,
+    saved: null, // summary of the history entry being viewed (no audio available)
   };
 
   // ------------------------------------------------------------ helpers ---
@@ -117,7 +120,8 @@
     stop();
     showError('');
     $('results').hidden = true;
-    Object.assign(state, { file, scan: null, report: null, channels: null, layers: null, tones: null, transcript: null });
+    Object.assign(state, { file, scan: null, report: null, channels: null, envelope: null, sgram: null, layers: null, tones: null, transcript: null, saved: null });
+    $('saved-banner').hidden = true;
     let bytes;
     try {
       setStatus('Scanning for threats…', 0.05);
@@ -133,6 +137,7 @@
     }
     if (state.scan.verdict === 'danger') {
       securityOnly('Audio analysis was skipped because this file looks dangerous. Don\'t open it in other programs.');
+      saveHistory();
       return;
     }
     try {
@@ -153,9 +158,11 @@
       showTabs(true);
       $('results').hidden = false;
       selectTab(state.scan.verdict === 'clean' ? 'health' : 'security');
+      saveHistory();
     } catch (e) {
       console.error(e);
       securityOnly(e.message || String(e));
+      saveHistory();
     }
   }
 
@@ -172,7 +179,7 @@
 
   function showTabs(all) {
     document.querySelectorAll('.tabs button').forEach((b) => { b.hidden = !all && b.dataset.tab !== 'security'; });
-    $('play-all').hidden = !all;
+    $('play-all').hidden = !all || !state.channels;
   }
 
   // ------------------------------------------------------------ security ---
@@ -199,6 +206,22 @@
     $('sec-findings').replaceChildren(...items.map((f) => el('li', { class: `issue ${f.severity}` },
       el('span', { class: 'icon', 'aria-label': f.severity }, SEC_ICON[f.severity]),
       el('div', {}, el('b', {}, f.title), el('p', {}, f.detail)))));
+    const MARK = { pass: '✓', warn: '!', fail: '✕', skip: '–' };
+    $('sec-checks').replaceChildren(...(r.checks || []).map((c) => el('li', { class: c.status },
+      el('span', { class: 'mark', 'aria-label': c.status }, MARK[c.status]),
+      el('b', {}, c.label), el('span', { class: 'detail' }, c.detail))));
+    const passed = (r.checks || []).filter((c) => c.status === 'pass').length;
+    const total = (r.checks || []).filter((c) => c.status !== 'skip').length;
+    const SAFETY = {
+      clean: ['Safe: no threats found', `Passed all ${total} security checks. The contents are real ${r.detected.name}.`],
+      suspicious: ['Suspicious: check the details', `Passed ${passed} of ${total} security checks. Something unusual was found.`],
+      danger: ['Dangerous: do not open this file', `Failed ${total - passed} of ${total} security checks.`],
+    }[r.verdict];
+    $('safety').className = `safety ${r.verdict}`;
+    $('safety-icon').textContent = icon;
+    $('safety-title').textContent = SAFETY[0];
+    $('safety-text').textContent = SAFETY[1];
+    $('safety').hidden = false;
     $('sec-type').textContent = r.detected.name;
     $('sec-size').textContent = `${r.size.toLocaleString('en-US')} bytes`;
     $('sec-hash').textContent = r.sha256 || 'Unavailable (needs https or localhost)';
@@ -206,6 +229,7 @@
     if (r.virusTotalUrl) $('sec-vt').href = r.virusTotalUrl;
     $('sec-copy').hidden = !r.sha256;
   }
+  $('safety').addEventListener('click', () => { selectTab('security'); document.querySelector('.tabs').scrollIntoView({ behavior: 'smooth', block: 'start' }); });
 
   // -------------------------------------------------------- google drive ---
 
@@ -276,35 +300,63 @@
         el('div', {}, el('b', {}, i.title), el('p', {}, i.detail))));
     }
 
-    const L = r.levels, LU = r.loudness, F = r.frequency, S = r.stereo;
-    const metrics = [
-      ['Peak level', fmt(L.peakDb, 1, ' dBFS'), 'Sample peak; keep below -1'],
-      ['Integrated loudness', fmt(LU.integrated, 1, ' LUFS'), 'Streaming ≈ -14, podcasts ≈ -16'],
-      ['Loudness range', fmt(LU.range, 1, ' LU'), 'How much loudness varies'],
-      ['Max short-term', fmt(LU.maxShortTerm, 1, ' LUFS'), 'Loudest 3 seconds'],
-      ['RMS level', fmt(L.rmsDb, 1, ' dBFS'), 'Average level'],
-      ['Crest factor', fmt(L.crestDb, 1, ' dB'), 'Peak vs average; low = squashed'],
-      ['Noise floor', fmt(L.noiseFloorDb, 1, ' dBFS'), 'Quietest 10 % of the file'],
-      ['Bandwidth', F.bandwidthHz ? fmtHz(F.bandwidthHz) : '—', F.sharpCutoff ? 'Sharp cutoff' : 'Highest real content'],
-      ['Clipping', L.clipEvents ? `${L.clipEvents} events` : 'None', `${L.clippedSamples} samples affected`],
-      ['DC offset', fmt(Math.max(...L.perChannel.map((c) => Math.abs(c.dcOffset))) * 100, 3, ' %'), 'Should be ~0'],
-      ['Silence', fmt(r.silence.percent, 1, ' %'), `${r.silence.dropouts.length} dropouts`],
-      ['Effective bit depth', `${r.info.effectiveBitDepth}-bit`, 'Resolution actually used'],
+    const L = r.levels, LU = r.loudness, F = r.frequency, S = r.stereo, I = r.info;
+    const X = AE.metrics(r);
+    const fmtInfo = I.format || {};
+    const rows = [
+      ['peak', 'Peak level', fmt(L.peakDb, 1, ' dBFS')],
+      ['loudness', 'Integrated loudness', fmt(LU.integrated, 1, ' LUFS')],
+      ['range', 'Loudness range', fmt(LU.range, 1, ' LU')],
+      ['shortTerm', 'Max short-term loudness', fmt(LU.maxShortTerm, 1, ' LUFS')],
+      ['crest', 'Crest factor', fmt(L.crestDb, 1, ' dB')],
+      ['rms', 'RMS level', fmt(L.rmsDb, 1, ' dBFS')],
+      ['clipping', 'Clipping', L.clipEvents ? `${L.clipEvents} events` : 'None'],
+      ['noise', 'Noise floor', fmt(L.noiseFloorDb, 1, ' dBFS')],
+      ['silence', 'Silence & dropouts', `${fmt(r.silence.percent, 1, ' %')} · ${r.silence.dropouts.length} dropout${r.silence.dropouts.length === 1 ? '' : 's'}`],
+      ['bandwidth', 'Bandwidth', F.bandwidthHz ? fmtHz(F.bandwidthHz) : '—'],
+      ['hum', 'Mains hum', F.hum.detected ? `${F.hum.frequency} Hz` : 'None'],
+      ['dc', 'DC offset', fmt(Math.max(...L.perChannel.map((c) => Math.abs(c.dcOffset))) * 100, 3, ' %')],
     ];
     if (S) {
-      metrics.push(['Stereo correlation', fmt(S.correlation, 2), '+1 mono · 0 wide · <0 phase issue']);
-      metrics.push(['Channel balance', S.balanceDb === null ? '—' : `${S.balanceDb > 0 ? 'L' : 'R'} +${Math.abs(S.balanceDb).toFixed(1)} dB`, 'Left vs right level']);
+      rows.push(['correlation', 'Stereo correlation', fmt(S.correlation, 2)]);
+      rows.push(['balance', 'Channel balance', S.balanceDb === null ? '—' : `${S.balanceDb > 0 ? 'L' : 'R'} +${Math.abs(S.balanceDb).toFixed(1)} dB`]);
     }
-    if (F.hum.detected) metrics.push(['Hum', `${F.hum.frequency} Hz`, 'Mains interference']);
-    $('metrics').replaceChildren(...metrics.map(([k, v, d]) => el('div', { class: 'metric' }, el('div', { class: 'k' }, k), el('div', { class: 'v' }, v), el('div', { class: 'd' }, d))));
+    rows.push(
+      ['bitDepth', 'Effective bit depth', `${I.effectiveBitDepth}-bit`],
+      ['sampleRate', 'Sample rate', `${(I.sampleRate / 1000).toFixed(I.sampleRate % 1000 ? 1 : 0)} kHz`],
+      ['format', 'Format', [fmtInfo.codec || fmtInfo.container || 'Unknown', fmtInfo.bitrateKbps ? `${fmtInfo.bitrateKbps} kbps` : null].filter(Boolean).join(' · ')],
+    );
+    $('metrics').replaceChildren(...rows.map(([id, label, value]) => explained(label, value, X[id])));
+
+    const notes = AE.charts(r);
+    $('wave-note').textContent = notes.wave;
+    $('spectrum-note').textContent = notes.spectrum;
+    $('spectrogram-note').textContent = notes.spectrogram;
+    $('bands-note').textContent = notes.bands;
 
     const maxPct = Math.max(...F.bands.map((b) => b.percent), 1);
-    $('bands').replaceChildren(...F.bands.map((b) => el('div', { class: 'band', title: `${b.name}: ${b.percent.toFixed(1)} % of energy` },
-      el('div', {}, b.name, el('div', { class: 'range' }, `${fmtHz(b.lo)}–${fmtHz(b.hi)}`)),
-      el('div', { class: 'track' }, el('div', { class: 'fill', style: `width:${(100 * b.percent) / maxPct}%` })),
-      el('div', { class: 'pct' }, `${b.percent.toFixed(1)}%`))));
+    $('bands').replaceChildren(...F.bands.map((b) => {
+      const x = AE.band(b);
+      return el('div', { class: `band status-${x.status}` },
+        el('div', {}, b.name, el('div', { class: 'range' }, `${fmtHz(b.lo)}–${fmtHz(b.hi)}`)),
+        el('div', { class: 'track' }, el('div', { class: 'fill', style: `width:${(100 * b.percent) / maxPct}%` })),
+        el('div', { class: 'pct' }, `${b.percent.toFixed(1)}%`),
+        el('p', { class: 'band-note' }, el('span', { class: 'what' }, x.what), ' ', statusChip(x.status), ' ', x.meaning));
+    }));
 
     drawHealthCharts();
+  }
+
+  const STATUS_LABEL = { good: 'Good', warn: 'Check', bad: 'Problem', neutral: 'Info' };
+  const statusChip = (status) => el('span', { class: `chip ${status}` }, STATUS_LABEL[status]);
+
+  /** A measurement card: value, what it is, and what it means for this file. */
+  function explained(label, value, x) {
+    return el('div', { class: `metric status-${x.status}` },
+      el('div', { class: 'metric-top' }, el('div', { class: 'k' }, label), statusChip(x.status)),
+      el('div', { class: 'v' }, value),
+      el('p', { class: 'meaning' }, x.meaning),
+      el('p', { class: 'what' }, x.what));
   }
 
   /** Min/max per column plus a clipping flag, computed once per file. */
@@ -496,12 +548,12 @@
 
   function drawHealthCharts() {
     if (!state.report) return;
-    drawWave();
+    if (state.envelope) drawWave();
     const spec = state.report.spectrum;
     const s = [{ dB: spec.dB, binHz: spec.binHz, sampleRate: spec.sampleRate, color: css('--s1'), name: '' }];
     drawSpectra($('spectrum'), s);
     hoverable($('spectrum'), $('spec-readout'), (x) => drawSpectra($('spectrum'), s, x));
-    drawSpectrogram();
+    if (state.sgram) drawSpectrogram();
   }
 
   // -------------------------------------------------------------- layers ---
@@ -527,6 +579,7 @@
       setStatus('');
       renderLayers();
       btn.textContent = 'Layers ready';
+      saveHistory();
     } catch (e) {
       console.error(e);
       setStatus('');
@@ -540,12 +593,16 @@
     const tones = state.tones;
     $('tones').replaceChildren(tones.length
       ? el('div', { class: 'table-wrap' }, el('table', {},
-        el('thead', {}, el('tr', {}, el('th', {}, 'Frequency'), el('th', {}, 'Level'), el('th', {}, 'Present'), el('th', {}, 'Likely source'))),
-        el('tbody', {}, tones.map((t) => el('tr', {},
-          el('td', { class: 'num' }, t.frequency >= 1000 ? `${(t.frequency / 1000).toFixed(3)} kHz` : `${t.frequency.toFixed(1)} Hz`),
-          el('td', { class: 'num' }, `${t.level.toFixed(1)} dBFS`),
-          el('td', { class: 'num' }, `${Math.round(t.presence * 100)} %`),
-          el('td', {}, t.label))))))
+        el('thead', {}, el('tr', {}, el('th', {}, 'Frequency'), el('th', {}, 'Level'), el('th', {}, 'Present'), el('th', {}, 'Likely source'), el('th', {}, 'What it means'))),
+        el('tbody', {}, tones.map((t) => {
+          const x = AE.tone(t);
+          return el('tr', {},
+            el('td', { class: 'num' }, t.frequency >= 1000 ? `${(t.frequency / 1000).toFixed(3)} kHz` : `${t.frequency.toFixed(1)} Hz`),
+            el('td', { class: 'num' }, `${t.level.toFixed(1)} dBFS`),
+            el('td', { class: 'num' }, `${Math.round(t.presence * 100)} %`),
+            el('td', { class: 'wrap' }, el('b', {}, t.label), el('div', { class: 'muted small' }, x.what)),
+            el('td', { class: 'wrap' }, x.meaning));
+        }))))
       : el('p', { class: 'muted' }, 'No steady tones found. Nothing seems to have been added at a fixed frequency.'));
 
     const series = state.layers.map((l) => ({
@@ -558,13 +615,21 @@
 
     $('layer-cards').replaceChildren(...state.layers.map((l) => {
       const top = [...l.bands].sort((a, b) => b.percent - a.percent).slice(0, 2).filter((b) => b.percent >= 5);
-      const playBtn = el('button', { class: 'btn small' }, '▶ Play');
-      playBtn.onclick = () => play([l.signal], 0, playBtn);
-      const dl = el('button', { class: 'btn ghost small' }, 'Download WAV');
-      dl.onclick = () => download(`${state.file.name.replace(/\.[^.]+$/, '')}-${l.id}.wav`, encodeWav([l.signal], state.sampleRate));
+      const x = AE.layer(l);
+      let actions;
+      if (l.signal) {
+        const playBtn = el('button', { class: 'btn small' }, '▶ Play');
+        playBtn.onclick = () => play([l.signal], 0, playBtn);
+        const dl = el('button', { class: 'btn ghost small' }, 'Download WAV');
+        dl.onclick = () => download(`${state.file.name.replace(/\.[^.]+$/, '')}-${l.id}.wav`, encodeWav([l.signal], state.sampleRate));
+        actions = el('div', { class: 'player' }, playBtn, dl);
+      } else {
+        actions = el('p', { class: 'muted small' }, 'Audio isn\'t stored in history. Open the file again to play this layer.');
+      }
       return el('article', { class: 'layer', style: `--c: var(${LAYER_COLOR[l.id]})` },
         el('h4', {}, l.name),
         el('p', { class: 'hint' }, l.hint),
+        el('p', { class: 'meaning' }, statusChip(x.status), ' ', x.meaning),
         el('dl', {},
           el('dt', {}, 'Share of energy'), el('dd', {}, `${l.sharePercent.toFixed(1)} %`),
           el('dt', {}, 'Level'), el('dd', {}, fmt(l.levelDb, 1, ' dBFS')),
@@ -572,7 +637,7 @@
           el('dt', {}, 'Strongest at'), el('dd', {}, fmtHz(l.dominantHz)),
           el('dt', {}, 'Brightness centre'), el('dd', {}, fmtHz(l.centroidHz)),
           el('dt', {}, 'Mostly'), el('dd', {}, top.map((b) => `${b.name} ${b.percent.toFixed(0)}%`).join(', ') || '—')),
-        el('div', { class: 'player' }, playBtn, dl));
+        actions);
     }));
   }
 
@@ -601,6 +666,7 @@
       state.transcript = result;
       setStatus('');
       renderTranscript();
+      saveHistory();
     } catch (e) {
       console.error(e);
       setStatus('');
@@ -619,12 +685,94 @@
       return;
     }
     list.replaceChildren(...chunks.map((c) => el('li', {
-      title: 'Play from here',
-      onclick: () => play(state.channels, c.timestamp[0] || 0, $('play-all'), false),
+      title: state.channels ? 'Play from here' : '',
+      onclick: () => state.channels && play(state.channels, c.timestamp[0] || 0, $('play-all'), false),
     }, el('time', {}, `${AT.fmtTime(c.timestamp[0])} – ${AT.fmtTime(c.timestamp[1] ?? state.report.info.duration)}`), el('span', {}, c.text.trim()))));
   }
 
   const transcriptText = () => (state.transcript.chunks || []).map((c) => `[${AT.fmtTime(c.timestamp[0])}] ${c.text.trim()}`).join('\n');
+
+  // ------------------------------------------------------------- history ---
+
+  async function saveHistory() {
+    if (state.saved || !HI.enabled()) return;
+    try {
+      await HI.save(state);
+      renderHistory();
+    } catch (e) {
+      console.warn('History not saved:', e);
+    }
+  }
+
+  const SEC_CHIP = { clean: ['good', 'Safe'], suspicious: ['warn', 'Suspicious'], danger: ['bad', 'Dangerous'] };
+
+  async function renderHistory() {
+    $('history-toggle').checked = HI.enabled();
+    let items = [];
+    try { items = await HI.list(); } catch (e) { console.warn(e); }
+    $('history-clear').hidden = !items.length;
+    const list = $('history-list');
+    if (!items.length) {
+      list.replaceChildren(el('li', { class: 'muted small empty' }, HI.enabled()
+        ? 'Nothing yet. Every file you check is saved here (results only, not the audio) so you can come back to it.'
+        : 'History is off. Turn it on to keep results of the files you check.'));
+      return;
+    }
+    list.replaceChildren(...items.map((h) => {
+      const sec = SEC_CHIP[h.security];
+      const meta = [
+        new Date(h.savedAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }),
+        h.duration !== null ? fmtDur(h.duration) : h.detected,
+        fmtSize(h.size),
+      ].filter(Boolean).join(' · ');
+      const del = el('button', { class: 'icon-btn', title: `Remove ${h.name} from history`, 'aria-label': `Remove ${h.name} from history` }, '✕');
+      del.onclick = async (e) => { e.stopPropagation(); await HI.remove(h.id); renderHistory(); };
+      return el('li', { class: state.saved && state.saved.id === h.id ? 'current' : '' },
+        el('button', { class: 'history-open', onclick: () => openSaved(h.id) },
+          el('span', { class: 'history-name' }, h.name),
+          el('span', { class: 'history-meta' }, meta),
+          el('span', { class: 'history-chips' },
+            h.score !== null ? el('span', { class: `chip ${h.score >= 90 ? 'good' : h.score >= 40 ? 'warn' : 'bad'}` }, `Health ${h.score}`) : null,
+            sec ? el('span', { class: `chip ${sec[0]}` }, sec[1]) : null,
+            h.hasLayers ? el('span', { class: 'chip neutral' }, 'Layers') : null,
+            h.hasTranscript ? el('span', { class: 'chip neutral' }, 'Transcript') : null)),
+        del);
+    }));
+  }
+
+  async function openSaved(id) {
+    stop();
+    showError('');
+    let rec;
+    try { rec = await HI.load(id); } catch (e) { showError(`Could not open saved result: ${e.message}`); return; }
+    if (!rec) { showError('That saved result no longer exists.'); renderHistory(); return; }
+    Object.assign(state, {
+      file: { name: rec.summary.name, size: rec.summary.size }, saved: rec.summary,
+      scan: rec.scan, report: rec.report, format: rec.format || {}, resampled: rec.resampled,
+      envelope: rec.envelope, sgram: rec.sgram, layers: rec.layers, tones: rec.tones, transcript: rec.transcript,
+      channels: null, sampleRate: rec.report ? rec.report.info.sampleRate : 0,
+    });
+    const when = new Date(rec.summary.savedAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+    $('saved-banner').textContent = `Saved result from ${when}. The audio isn't stored, so playback, layer separation and transcription need the file. Drop it again to use them.`;
+    $('saved-banner').hidden = false;
+    if (state.scan) renderSecurity(); else $('safety').hidden = true;
+    if (!rec.report) {
+      securityOnly('');
+    } else {
+      renderHeader();
+      renderHealth();
+      if (state.layers) { renderLayers(); $('run-layers').textContent = 'Saved layers'; } else { resetLayers(); $('run-layers').textContent = 'Needs the audio file'; }
+      $('run-layers').disabled = true;
+      resetTranscript();
+      if (state.transcript) renderTranscript();
+      $('run-asr').disabled = true;
+      showTabs(true);
+      $('results').hidden = false;
+      selectTab('health');
+    }
+    renderHistory();
+    $('results').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
 
   // -------------------------------------------------------------- export ---
 
@@ -684,6 +832,13 @@
     if (link) { $('link').value = link; loadFromDrive((p) => GD.fromLink(link, p)); }
   });
   $('sec-copy').addEventListener('click', () => navigator.clipboard.writeText(state.scan.sha256));
+  $('history-toggle').addEventListener('change', (e) => { HI.setEnabled(e.target.checked); renderHistory(); });
+  $('history-clear').addEventListener('click', async () => {
+    if (!confirm('Remove all saved results from this browser?')) return;
+    await HI.clear();
+    renderHistory();
+  });
+  renderHistory();
   document.querySelectorAll('.tabs button').forEach((b) => b.addEventListener('click', () => selectTab(b.dataset.tab)));
   $('play-all').addEventListener('click', (e) => play(state.channels, 0, e.currentTarget));
   $('export').addEventListener('click', exportReport);

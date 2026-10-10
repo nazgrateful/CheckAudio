@@ -327,24 +327,24 @@
   /** Smallest bit depth (8/16/24) that represents every sampled value; 32 if none. */
   function effectiveBitDepth(channels) {
     const limit = 2_000_000;
-    // Decoders scale integers by 2^(b-1) or 2^(b-1)-1, so accept either.
-    const fits = (bits, scale, tol) => {
+    // Decoders scale integers by 2^(b-1) or 2^(b-1)-1 (Chrome even mixes the two:
+    // 32767 for positive samples, 32768 for negative), so accept either per sample.
+    const near = (v, tol) => Math.abs(v - Math.round(v)) <= tol;
+    const fits = (bits) => {
+      const s = 2 ** (bits - 1);
       let seen = 0;
       for (const ch of channels) {
         const step = Math.max(1, Math.floor(ch.length / limit));
         for (let i = 0; i < ch.length; i += step) {
-          const v = ch[i] * scale;
-          if (Math.abs(v - Math.round(v)) > tol) return false;
-          if (ch[i] !== 0) seen++;
+          const x = ch[i];
+          if (!near(x * s, 1e-3) && !(bits < 24 && near(x * (s - 1), 1e-2))) return false;
+          if (x !== 0) seen++;
         }
       }
       return seen > 0;
     };
-    for (const bits of [8, 16]) {
-      const s = 2 ** (bits - 1);
-      if (fits(bits, s, 1e-3) || fits(bits, s - 1, 1e-2)) return bits;
-    }
-    return fits(24, 2 ** 23, 1e-3) ? 24 : 32;
+    for (const bits of [8, 16]) if (fits(bits)) return bits;
+    return fits(24) ? 24 : 32;
   }
 
   function stereo(left, right) {
@@ -748,6 +748,7 @@
         clippedSamples,
         clipEvents,
         noiseFloorDb: noiseFloor,
+        typicalDb: typical,
       },
       loudness: loud,
       silence: { percent: lv.length ? (100 * silent) / lv.length : 0, leadingSeconds: lead * blocks.blockSeconds, trailingSeconds: trail * blocks.blockSeconds, dropouts },
