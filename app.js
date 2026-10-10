@@ -5,10 +5,12 @@
   const AH = window.AudioHealth;
   const AL = window.AudioLayers;
   const AT = window.AudioTranscribe;
+  const AS = window.AudioScan;
+  const GD = window.GDrive;
   const $ = (id) => document.getElementById(id);
 
   const state = {
-    file: null, channels: null, sampleRate: 0, format: null, resampled: false,
+    file: null, scan: null, channels: null, sampleRate: 0, format: null, resampled: false,
     report: null, envelope: null, sgram: null,
     layers: null, tones: null, transcript: null,
   };
@@ -17,6 +19,7 @@
 
   const fmt = (v, d = 1, unit = '') => (v === null || v === undefined || !Number.isFinite(v) ? '—' : `${v.toFixed(d)}${unit}`);
   const fmtHz = (f) => (f >= 1000 ? `${(f / 1000).toFixed(f >= 10000 ? 1 : 2)} kHz` : `${Math.round(f)} Hz`);
+  const fmtSize = (b) => (b >= 1e6 ? `${(b / 1e6).toFixed(1)} MB` : `${Math.max(1, Math.round(b / 1e3))} KB`);
   const fmtDur = (s) => { const m = Math.floor(s / 60); return `${m}:${String(Math.floor(s % 60)).padStart(2, '0')}`; };
   const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
   const isDark = () => matchMedia('(prefers-color-scheme: dark)').matches && document.documentElement.dataset.theme !== 'light'
@@ -90,8 +93,7 @@
 
   // ------------------------------------------------------------ loading ---
 
-  async function decode(file) {
-    const bytes = await file.arrayBuffer();
+  async function decode(bytes) {
     const format = AH.sniffFormat(new Uint8Array(bytes, 0, Math.min(bytes.byteLength, 4 << 20)));
     const known = format.sampleRate >= 8000 && format.sampleRate <= 384000;
     const tryRate = async (rate) => {
@@ -115,11 +117,28 @@
     stop();
     showError('');
     $('results').hidden = true;
-    Object.assign(state, { file, layers: null, tones: null, transcript: null });
+    Object.assign(state, { file, scan: null, report: null, channels: null, layers: null, tones: null, transcript: null });
+    let bytes;
+    try {
+      setStatus('Scanning for threats…', 0.05);
+      await tick();
+      bytes = await file.arrayBuffer();
+      state.scan = await AS.scan(bytes, file.name);
+      renderSecurity();
+    } catch (e) {
+      console.error(e);
+      setStatus('');
+      showError(`Could not read the file: ${e.message}`);
+      return;
+    }
+    if (state.scan.verdict === 'danger') {
+      securityOnly('Audio analysis was skipped because this file looks dangerous. Don\'t open it in other programs.');
+      return;
+    }
     try {
       setStatus('Decoding audio…', 0.1);
       await tick();
-      Object.assign(state, await decode(file));
+      Object.assign(state, await decode(bytes));
       setStatus('Running health check…', 0.5);
       await tick();
       state.report = AH.analyze(state.channels, state.sampleRate, state.format);
@@ -131,13 +150,86 @@
       renderHealth();
       resetLayers();
       resetTranscript();
+      showTabs(true);
       $('results').hidden = false;
-      selectTab('health');
+      selectTab(state.scan.verdict === 'clean' ? 'health' : 'security');
+    } catch (e) {
+      console.error(e);
+      securityOnly(e.message || String(e));
+    }
+  }
+
+  /** Show only the Security tab, e.g. when the file is dangerous or isn't decodable audio. */
+  function securityOnly(message) {
+    setStatus('');
+    $('file-name').textContent = state.file.name;
+    $('file-meta').textContent = `${state.scan.detected.name} · ${fmtSize(state.file.size)}`;
+    showTabs(false);
+    $('results').hidden = false;
+    selectTab('security');
+    showError(message);
+  }
+
+  function showTabs(all) {
+    document.querySelectorAll('.tabs button').forEach((b) => { b.hidden = !all && b.dataset.tab !== 'security'; });
+    $('play-all').hidden = !all;
+  }
+
+  // ------------------------------------------------------------ security ---
+
+  const SEC_TEXT = {
+    clean: ['No threats found', 'Nothing suspicious was found in this file.', '✓'],
+    suspicious: ['Suspicious', 'Something unusual was found. Read the findings before trusting this file.', '!'],
+    danger: ['Dangerous file', 'This file shows clear signs of malware or a disguised program. Do not open it.', '✕'],
+  };
+  const SEC_ICON = { critical: '✕', warning: '!', info: 'i', ok: '✓' };
+
+  function renderSecurity() {
+    const r = state.scan;
+    const [title, sub, icon] = SEC_TEXT[r.verdict];
+    $('sec-shield').className = `shield ${r.verdict}`;
+    $('sec-shield').textContent = icon;
+    $('sec-verdict').textContent = title;
+    $('sec-sub').textContent = sub;
+    const badge = $('sec-badge');
+    badge.className = `badge ${r.verdict}`;
+    badge.textContent = icon;
+    badge.setAttribute('aria-label', title);
+    const items = r.findings.length ? r.findings : [{ severity: 'ok', title: 'Clean', detail: `The content is real ${r.detected.name}. There are no hidden programs, archives, scripts or malformed headers, and the name matches the content.` }];
+    $('sec-findings').replaceChildren(...items.map((f) => el('li', { class: `issue ${f.severity}` },
+      el('span', { class: 'icon', 'aria-label': f.severity }, SEC_ICON[f.severity]),
+      el('div', {}, el('b', {}, f.title), el('p', {}, f.detail)))));
+    $('sec-type').textContent = r.detected.name;
+    $('sec-size').textContent = `${r.size.toLocaleString('en-US')} bytes`;
+    $('sec-hash').textContent = r.sha256 || 'Unavailable (needs https or localhost)';
+    $('sec-vt').hidden = !r.virusTotalUrl;
+    if (r.virusTotalUrl) $('sec-vt').href = r.virusTotalUrl;
+    $('sec-copy').hidden = !r.sha256;
+  }
+
+  // -------------------------------------------------------- google drive ---
+
+  async function loadFromDrive(getFile) {
+    showError('');
+    try {
+      setStatus('Connecting to Google Drive…');
+      const file = await getFile((loaded, total) => setStatus(`Downloading from Google Drive… ${(loaded / 1e6).toFixed(1)} / ${(total / 1e6).toFixed(1)} MB`, loaded / total));
+      setStatus('');
+      if (file) await loadFile(file);
     } catch (e) {
       console.error(e);
       setStatus('');
       showError(e.message || String(e));
     }
+  }
+
+  /** Text dragged or pasted from Google Drive arrives as a link rather than a file. */
+  function driveLinkFrom(dt) {
+    for (const type of ['text/uri-list', 'text/plain', 'text/html']) {
+      const v = dt.getData(type);
+      if (v && GD.extractId(v)) return v;
+    }
+    return null;
   }
 
   // -------------------------------------------------------------- header ---
@@ -153,7 +245,7 @@
       f.codec || f.container,
       f.bitDepth ? `${f.bitDepth}-bit` : null,
       f.bitrateKbps ? `${f.bitrateKbps} kbps` : null,
-      `${(state.file.size / 1e6).toFixed(1)} MB`,
+      fmtSize(state.file.size),
     ].filter(Boolean);
     if (state.resampled) parts.push('sample rate set by browser');
     $('file-meta').textContent = parts.join(' · ');
@@ -537,14 +629,14 @@
   // -------------------------------------------------------------- export ---
 
   function exportReport() {
-    const r = state.report;
-    const { spectrum, loudness, ...rest } = r;
+    const { spectrum, loudness = {}, ...rest } = state.report || {};
     const { shortTermCurve, ...loud } = loudness;
     const out = {
       file: state.file.name,
       generated: new Date().toISOString(),
+      security: state.scan,
       ...rest,
-      loudness: loud,
+      loudness: state.report ? loud : undefined,
       layers: state.layers && state.layers.map(({ signal, spectrum: s, ...l }) => l),
       steadyTones: state.tones,
       transcript: state.transcript && { text: state.transcript.text, segments: state.transcript.chunks },
@@ -573,7 +665,25 @@
   drop.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); $('file').click(); } });
   ['dragenter', 'dragover'].forEach((t) => drop.addEventListener(t, (e) => { e.preventDefault(); drop.classList.add('over'); }));
   ['dragleave', 'drop'].forEach((t) => drop.addEventListener(t, (e) => { e.preventDefault(); drop.classList.remove('over'); }));
-  drop.addEventListener('drop', (e) => e.dataTransfer.files[0] && loadFile(e.dataTransfer.files[0]));
+  drop.addEventListener('drop', (e) => {
+    if (e.dataTransfer.files[0]) return loadFile(e.dataTransfer.files[0]);
+    const link = driveLinkFrom(e.dataTransfer);
+    if (link) loadFromDrive((p) => GD.fromLink(link, p));
+    else showError('That drop did not contain a file. Drag the file itself, or paste a Google Drive link below.');
+  });
+  $('gdrive').addEventListener('click', () => loadFromDrive((p) => GD.fromPicker(p)));
+  $('link-form').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const v = $('link').value.trim();
+    if (v) loadFromDrive((p) => GD.fromLink(v, p));
+  });
+  document.addEventListener('paste', (e) => {
+    if (e.target.closest && e.target.closest('input, textarea, select')) return;
+    if (e.clipboardData.files[0]) return loadFile(e.clipboardData.files[0]);
+    const link = driveLinkFrom(e.clipboardData);
+    if (link) { $('link').value = link; loadFromDrive((p) => GD.fromLink(link, p)); }
+  });
+  $('sec-copy').addEventListener('click', () => navigator.clipboard.writeText(state.scan.sha256));
   document.querySelectorAll('.tabs button').forEach((b) => b.addEventListener('click', () => selectTab(b.dataset.tab)));
   $('play-all').addEventListener('click', (e) => play(state.channels, 0, e.currentTarget));
   $('export').addEventListener('click', exportReport);
