@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CheckAudio</title>
+  <meta name="description" content="Check the health of an audio file, dissect its layers and frequencies, and transcribe the speech, all in your browser.">
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="top">
+    <div class="wrap top-inner">
+      <div class="brand">
+        <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M3 12h2l2-6 3 12 3-9 2 5 2-2h4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span>CheckAudio</span>
+      </div>
+      <p class="tagline">Health check · Layers · Transcript. Your file never leaves your computer.</p>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <label id="drop" class="drop" tabindex="0">
+      <input id="file" type="file" accept="audio/*,.wav,.flac,.mp3,.ogg,.opus,.m4a,.aac,.aif,.aiff,.webm" hidden>
+      <strong>Drop an audio file here</strong>
+      <span>or click to choose · WAV, FLAC, MP3, OGG, Opus, M4A</span>
+    </label>
+
+    <div id="status" class="status" role="status" hidden>
+      <div class="spinner" aria-hidden="true"></div>
+      <span id="status-text">Working…</span>
+      <div class="bar"><div id="status-bar"></div></div>
+    </div>
+    <p id="error" class="error" role="alert" hidden></p>
+
+    <section id="results" hidden>
+      <div class="file-head">
+        <div>
+          <h1 id="file-name"></h1>
+          <p id="file-meta" class="muted"></p>
+        </div>
+        <div class="player">
+          <button id="play-all" class="btn">▶ Play</button>
+          <button id="export" class="btn ghost">Export report</button>
+        </div>
+      </div>
+
+      <nav class="tabs" role="tablist">
+        <button role="tab" aria-selected="true" data-tab="health">Health</button>
+        <button role="tab" aria-selected="false" data-tab="layers">Layers &amp; frequencies</button>
+        <button role="tab" aria-selected="false" data-tab="transcript">Transcript</button>
+      </nav>
+
+      <!-- Health -->
+      <div class="panel" data-panel="health">
+        <div class="summary">
+          <div class="score" id="score-box">
+            <div class="score-num" id="score"></div>
+            <div class="score-label">/ 100</div>
+          </div>
+          <div>
+            <h2 id="verdict"></h2>
+            <p class="muted" id="verdict-sub"></p>
+          </div>
+        </div>
+
+        <h3>Findings</h3>
+        <ul id="issues" class="issues"></ul>
+
+        <h3>Measurements</h3>
+        <div id="metrics" class="metrics"></div>
+
+        <div class="chart-card">
+          <div class="chart-head"><h3>Waveform</h3><span class="muted small">Red marks = clipping</span></div>
+          <canvas id="wave" height="140"></canvas>
+        </div>
+        <div class="chart-card">
+          <div class="chart-head"><h3>Frequency spectrum</h3><span class="muted small" id="spec-readout">Hover for values</span></div>
+          <canvas id="spectrum" height="220"></canvas>
+        </div>
+        <div class="chart-card">
+          <div class="chart-head"><h3>Spectrogram</h3><span class="muted small">Time → · frequency ↑ (log) · brighter = louder</span></div>
+          <canvas id="spectrogram" height="220"></canvas>
+        </div>
+        <div class="chart-card">
+          <div class="chart-head"><h3>Energy by frequency band</h3></div>
+          <div id="bands" class="bands"></div>
+        </div>
+      </div>
+
+      <!-- Layers -->
+      <div class="panel" data-panel="layers" hidden>
+        <div class="intro">
+          <p>Splits the audio into layers you can listen to on their own, and shows the frequencies each one covers. It also lists any <b>steady tones</b> running through the whole file. Those are usually things added to the recording, such as hum, whine, test tones or watermarks.</p>
+          <button id="run-layers" class="btn">Dissect layers</button>
+        </div>
+        <div id="layers-out" hidden>
+          <h3>Steady tones (added frequencies)</h3>
+          <div id="tones"></div>
+          <div class="chart-card">
+            <div class="chart-head"><h3>Layer spectra</h3><span class="muted small" id="layer-readout">Hover for values</span></div>
+            <div id="layer-legend" class="legend"></div>
+            <canvas id="layer-spectrum" height="240"></canvas>
+          </div>
+          <h3>Layers</h3>
+          <div id="layer-cards" class="layer-cards"></div>
+          <p class="muted small">These layers are separated with signal processing, not AI. Tonal, percussive and noise always add back up to the original, but the split is a rough one. For true vocal, drum and bass stems you need an AI separator such as Demucs.</p>
+        </div>
+      </div>
+
+      <!-- Transcript -->
+      <div class="panel" data-panel="transcript" hidden>
+        <div class="intro">
+          <p>Speech-to-text with OpenAI's Whisper model, running locally in your browser. The model downloads once (about 40 to 250 MB, depending on size), then stays cached.</p>
+          <div class="controls">
+            <label>Model
+              <select id="asr-model">
+                <option value="onnx-community/whisper-tiny">Tiny: fastest (~40 MB)</option>
+                <option value="onnx-community/whisper-base" selected>Base: balanced (~80 MB)</option>
+                <option value="onnx-community/whisper-small">Small: most accurate (~250 MB)</option>
+              </select>
+            </label>
+            <label>Language
+              <select id="asr-lang">
+                <option value="">Auto-detect</option>
+                <option value="english">English</option><option value="spanish">Spanish</option><option value="french">French</option>
+                <option value="german">German</option><option value="italian">Italian</option><option value="portuguese">Portuguese</option>
+                <option value="dutch">Dutch</option><option value="russian">Russian</option><option value="ukrainian">Ukrainian</option>
+                <option value="polish">Polish</option><option value="turkish">Turkish</option><option value="arabic">Arabic</option>
+                <option value="hindi">Hindi</option><option value="chinese">Chinese</option><option value="japanese">Japanese</option>
+                <option value="korean">Korean</option>
+              </select>
+            </label>
+            <label>Source
+              <select id="asr-source">
+                <option value="mix">Full mix</option>
+                <option value="mid">Centre channel: better for vocals over music</option>
+              </select>
+            </label>
+            <button id="run-asr" class="btn">Transcribe</button>
+          </div>
+        </div>
+        <div id="transcript-out" hidden>
+          <div class="chart-head">
+            <h3>Transcript</h3>
+            <div class="player">
+              <button id="copy-txt" class="btn ghost">Copy</button>
+              <button id="dl-txt" class="btn ghost">.txt</button>
+              <button id="dl-srt" class="btn ghost">.srt subtitles</button>
+            </div>
+          </div>
+          <p class="muted small">Click a line to play from that point.</p>
+          <ol id="segments" class="segments"></ol>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script src="analysis.js"></script>
+  <script src="layers.js"></script>
+  <script src="transcribe.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

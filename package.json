@@ -1,0 +1,11 @@
+{
+  "name": "checkaudio",
+  "version": "1.0.0",
+  "description": "Browser app that checks audio health, dissects layers and frequencies, and transcribes speech.",
+  "private": true,
+  "scripts": {
+    "start": "python3 -m http.server 8000",
+    "test": "node --test test/*.test.js"
+  },
+  "license": "MIT"
+}
